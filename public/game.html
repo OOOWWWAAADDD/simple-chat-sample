@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>トロッコクイズゲーム (IT・プログラミング特化)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script src="https://cdn.socket.io/4.5.1/socket.io.esm.min.js" type="module"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #333; }
+        canvas { display: block; }
+        #quiz-overlay {
+            position: absolute;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            font-family: 'Helvetica Neue', sans-serif;
+            z-index: 10;
+        }
+        #top-info {
+            position: absolute;
+            top: 5vh;
+            width: 100%;
+            text-align: center;
+        }
+        #timer {
+            font-size: 80px;
+            font-weight: bold;
+            color: #ff5722; 
+            text-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+        }
+        #question-box {
+            background: rgba(40, 44, 52, 0.9);
+            color: white;
+            padding: 20px;
+            margin: 3vh auto 0;
+            border-radius: 15px;
+            max-width: 90%;
+            border: 3px solid #ffcc00;
+            font-size: 32px;
+            line-height: 1.6;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.5);
+        }
+        .option-container {
+            display: flex;
+            justify-content: center;
+            margin-top: 15px;
+            font-size: 28px;
+        }
+        .option {
+            padding: 10px 20px;
+            margin: 0 15px;
+            border-radius: 8px;
+            background-color: rgba(255, 255, 255, 0.1);
+            transition: background-color 0.3s, color 0.3s;
+        }
+        .selected {
+            background-color: rgba(255, 204, 0, 0.7); 
+            color: #333;
+            font-weight: bold;
+        }
+        .correct-result { background-color: rgba(76, 175, 80, 0.8); color: white; }
+        .incorrect-result { background-color: rgba(244, 67, 54, 0.8); color: white; }
+
+        /* 進路選択メッセージの位置を調整 */
+        #message {
+            position: absolute;
+            bottom: 20vh; /* 画面下から20%の位置に固定 */
+            width: 100%;
+            text-align: center;
+            font-size: 48px;
+            font-weight: 900;
+            color: #00bcd4;
+            text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.7);
+        }
+        
+        /* --- ライフ表示とガイド --- */
+        #status-area {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            text-align: right;
+            color: white;
+            z-index: 15;
+        }
+        #life {
+            font-size: 36px;
+            margin-bottom: 10px;
+            text-shadow: 0 0 5px rgba(0, 0, 0, 0.8);
+        }
+        .heart { color: #f44336; margin-left: 5px; } 
+        #instructions {
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px 15px;
+            border-radius: 10px;
+            font-size: 16px;
+            border: 2px solid #ffcc00;
+        }
+        .instruction-control { font-weight: bold; color: #ffcc00; }
+
+        /* 確定後の結果オーバーレイ */
+        #result-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            color: white;
+            font-weight: 900;
+            text-shadow: 4px 4px 10px rgba(0, 0, 0, 0.9);
+        }
+        .result-correct { 
+            animation: flash-green 0.15s ease-out 4;
+            background: rgba(76, 175, 80, 0.95);
+        }
+        .result-message { 
+            font-size: 120px; 
+            animation: pulse-message 0.5s ease-in-out infinite alternate;
+        }
+        .result-answer { font-size: 40px; margin-top: 10px; }
+
+        @keyframes flash-green {
+            0% { background-color: rgba(76, 175, 80, 0.95); }
+            50% { background-color: rgba(0, 0, 0, 0.7); }
+            100% { background-color: rgba(76, 175, 80, 0.95); }
+        }
+        @keyframes pulse-message {
+            from { transform: scale(1); }
+            to { transform: scale(1.1); }
+        }
+        .damage-effect { animation: flash-red 0.3s ease-in-out 3; }
+        @keyframes flash-red {
+            0% { background-color: transparent; }
+            50% { background-color: rgba(255, 0, 0, 0.4); }
+            100% { background-color: transparent; }
+        }
+
+        .result-final-clear {
+            background: radial-gradient(circle at center, rgba(255, 223, 0, 0.95), rgba(255, 140, 0, 0.8));
+            animation: golden-glow 1s infinite alternate;
+        }
+        .result-final-clear .result-message {
+            font-size: 150px;
+            color: #a00;
+            text-shadow: 0 0 20px #ffcc00, 0 0 30px #ff8800;
+        }
+        .result-final-clear .result-answer {
+             color: #333;
+             font-weight: bold;
+        }
+        @keyframes golden-glow {
+            from { box-shadow: 0 0 50px rgba(255, 215, 0, 0.5); }
+            to { box-shadow: 0 0 80px rgba(255, 140, 0, 0.8); }
+        }
+
+        /* ゲームオーバー画面 */
+        #gameover-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            color: white;
+            z-index: 100;
+        }
+        #gameover-title { font-size: 80px; font-weight: 900; color: #f44336; margin-bottom: 30px; }
+        #retry-message { font-size: 30px; margin-bottom: 20px; }
+        #shake-gauge-container { width: 80%; max-width: 500px; height: 30px; background: #555; border-radius: 15px; overflow: hidden; border: 2px solid white; }
+        #shake-gauge { height: 100%; width: 0%; background: linear-gradient(90deg, #ffcc00, #ff5722); transition: width 0.1s; }
+        
+        /* 開始待機画面 */
+        #start-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            color: white;
+            z-index: 50;
+        }
+        .start-title { font-size: 60px; margin-bottom: 20px; color: #ffcc00; }
+        .start-instruction { font-size: 30px; margin-bottom: 10px; }
+        .start-highlight { color: #00bcd4; font-weight: bold; }
+
+    </style>
+</head>
+<body>
+    <div id="quiz-overlay">
+        <div id="top-info">
+            <div id="timer"></div>
+            <div id="question-box">
+                <div id="question"></div>
+                <div class="option-container">
+                    <span id="left-option" class="option"></span>
+                    <span id="right-option" class="option"></span>
+                </div>
+            </div>
+            </div>
+        
+        <div id="message"></div>
+
+        <div id="status-area">
+            <div id="life"></div>
+            <div id="instructions">
+                🕹️ **操作ガイド**<br>
+                <span class="instruction-control">**傾ける**</span>: 進路を選択<br>
+                <span class="instruction-control">**振る**</span>: 進路を確定！
+            </div>
+        </div>
+    </div>
+
+    <div id="result-overlay">
+        <div class="result-message"></div>
+        <div class="result-answer"></div>
+        <div id="secret-hint" style="font-size: 24px; color: #333; margin-top: 30px; background: rgba(255, 255, 255, 0.7); padding: 10px; border-radius: 5px; display: none;"></div>
+        <div id="result-retry-message" style="font-size: 30px; color: #333; margin-top: 30px; font-weight: bold; display: none;">スマホを振ってリトライ！</div>
+    </div>
+    
+    <div id="start-screen">
+        <div class="start-title">トロッコ・サバイバル・クイズ！</div>
+        <div id="mode-display" class="start-instruction">難易度: <span class="start-highlight" style="color: #4CAF50;">ITパスポートレベル</span></div>
+        <div class="start-instruction">🚨 <span class="start-highlight">IT・プログラミング基礎</span> に挑戦！</div>
+        <div class="start-instruction">**操作方法**</div>
+        <div class="start-instruction"><span class="start-highlight">① 傾ける</span>：スマホを左右に傾けて選択肢を選びます。</div>
+        <div class="start-instruction"><span class="start-highlight">② 振る</span>：選択を確定します。</div>
+        <div style="height: 30px;"></div>
+        <div class="start-title">準備ができたら、<span class="start-highlight">スマホを一回振って</span>ゲームスタート！</div>
+    </div>
+
+    <div id="gameover-screen">
+        <div id="gameover-title">GAME OVER</div>
+        <div id="gameover-score"></div>
+        <div id="retry-message">再挑戦！スマートフォンを振ってゲージを満タンにせよ！</div>
+        <div id="shake-gauge-container"><div id="shake-gauge"></div></div>
+    </div>
+
+    <script type="module">
+        import { io } from "https://cdn.socket.io/4.5.1/socket.io.esm.min.js";
+        
+        const socket = io();
+        socket.emit('join', 'game'); 
+
+        let currentGamma = 0; 
+        let currentZ = 0;     
+        let lastZ = 0;
+        const SHAKE_THRESHOLD = 15;
+        let isShakeDetected = false;
+        let shakeCount = 0; 
+        
+        // シークレットコマンド検出用
+        const SECRET_COMMAND_SEQUENCE = ['R', 'L', 'R']; // 右、左、右
+        let secretCommandLog = [];
+        const SECRET_COMMAND_THRESHOLD = 15; // ガンマ値の閾値
+
+        // UI要素の参照
+        const leftOptionEl = document.getElementById('left-option');
+        const rightOptionEl = document.getElementById('right-option');
+        const resultOverlayEl = document.getElementById('result-overlay');
+        const resultMsgEl = resultOverlayEl.querySelector('.result-message');
+        const resultAnsEl = resultOverlayEl.querySelector('.result-answer');
+        const topInfoEl = document.getElementById('top-info');
+        const lifeEl = document.getElementById('life');
+        const quizOverlayEl = document.getElementById('quiz-overlay');
+        const gameoverScreenEl = document.getElementById('gameover-screen');
+        const shakeGaugeEl = document.getElementById('shake-gauge');
+        const gameoverScoreEl = document.getElementById('gameover-score');
+        const startScreenEl = document.getElementById('start-screen');
+        const secretHintEl = document.getElementById('secret-hint');
+        const resultRetryMsgEl = document.getElementById('result-retry-message');
+        const modeDisplayEl = document.getElementById('mode-display');
+        const messageEl = document.getElementById('message');
+
+        // Socket.IOからのセンサーデータ受信
+        socket.on('sensor', (data) => {
+            currentGamma = parseFloat(data.g); 
+            currentZ = parseFloat(data.z);     
+            
+            // シークレットコマンドのログ記録 (WAITING時のみ)
+            if (game.state === 'WAITING') {
+                logSecretCommandDirection(currentGamma);
+            }
+            
+            // シェイク検出ロジック
+            if (Math.abs(currentZ - lastZ) > SHAKE_THRESHOLD && !isShakeDetected) {
+                isShakeDetected = true;
+                if (game.state === 'GAMEOVER') {
+                    handleRetryShake();
+                } else if (game.state === 'WAITING') {
+                    handleStartShake();
+                } else if (game.state === 'RESULT') {
+                    handleResultShake(); // ゴール後のリトライは最初の画面に戻る
+                } else {
+                    handleShake();
+                }
+                setTimeout(() => { isShakeDetected = false; }, 500); 
+            }
+            lastZ = currentZ;
+        });
+
+        // ----------------------------------------------------
+        // シークレットコマンドロジック
+        // ----------------------------------------------------
+        function logSecretCommandDirection(gamma) {
+            let direction = null;
+            if (gamma > SECRET_COMMAND_THRESHOLD) {
+                direction = 'R';
+            } else if (gamma < -SECRET_COMMAND_THRESHOLD) {
+                direction = 'L';
+            }
+            
+            if (direction) {
+                if (secretCommandLog.length === 0 || secretCommandLog[secretCommandLog.length - 1] !== direction) {
+                    secretCommandLog.push(direction);
+                    
+                    if (secretCommandLog.length > SECRET_COMMAND_SEQUENCE.length * 2) {
+                        secretCommandLog = [];
+                    }
+
+                    if (secretCommandLog.slice(-SECRET_COMMAND_SEQUENCE.length).join('') === SECRET_COMMAND_SEQUENCE.join('')) {
+                        if (!game.isHardMode) {
+                            game.toggleHardMode();
+                        }
+                        secretCommandLog = []; 
+                    }
+                }
+            }
+        }
+        
+        function handleRetryShake() {
+            const GAUGE_MAX = 5; 
+            shakeCount = Math.min(GAUGE_MAX, shakeCount + 1);
+            shakeGaugeEl.style.width = `${(shakeCount / GAUGE_MAX) * 100}%`;
+
+            if (shakeCount >= GAUGE_MAX) {
+                game.initGame(); // ゲームオーバーからのリトライも最初の画面へ
+            }
+        }
+        
+        function handleStartShake() {
+             game.state = 'ASKING';
+             startScreenEl.style.display = 'none';
+             game.nextQuestion();
+        }
+
+        function handleResultShake() {
+            // ゴール後のシェイクは最初の画面に戻る
+             game.initGame();
+        }
+        
+        function handleShake() {
+             if (game) game.handleShake();
+        }
+
+        // ----------------------------------------------------
+        // p5.js のセットアップと描画
+        // ----------------------------------------------------
+
+        let game;
+        
+        window.setup = function() {
+            createCanvas(windowWidth, windowHeight, WEBGL);
+            angleMode(DEGREES);
+            game = new TrocoQuizGame();
+        }
+
+        window.draw = function() {
+            game.update();
+            game.display();
+        }
+
+        window.windowResized = function() {
+            resizeCanvas(windowWidth, windowHeight);
+        }
+
+        /**
+         * トロッコクイズゲームのメインクラス
+         */
+        class TrocoQuizGame {
+            constructor() {
+                // 問題ストック（合計30問）
+                this.normalQuestions = [
+                    // ITパスポートレベル（基礎知識）- 計15問
+                    { q: "コンピュータが理解できる言語は？", options: ["Python", "機械語"], correct: "機械語" },
+                    { q: "Webページに使われるマークアップ言語は？", options: ["Java", "HTML"], correct: "HTML" },
+                    { q: "ネットワークでデータを送るための基本的な手順を定めたものは？", options: ["プロトコル", "アルゴリズム"], correct: "プロトコル" },
+                    { q: "データの並べ替え処理を何というか？", options: ["ソート", "リバース"], correct: "ソート" },
+                    { q: "データを改ざんから守ることを目的としたものは？", options: ["機密性", "完全性"], correct: "完全性" },
+                    { q: "サービスとしてのソフトウェアを意味する略語は？", options: ["PaaS", "SaaS"], correct: "SaaS" },
+                    { q: "1バイトは何ビットか？", options: ["4ビット", "8ビット"], correct: "8ビット" },
+                    { q: "プログラムを一行ずつ実行し、バグを見つける手法は？", options: ["コンパイル", "デバッグ"], correct: "デバッグ" },
+                    { q: "データの機密性、完全性、可用性の頭文字を取った略語は？", options: ["QoS", "CIA"], correct: "CIA" },
+                    { q: "インターネット上の住所にあたるものは？", options: ["ドメイン名", "IPアドレス"], correct: "IPアドレス" },
+                    { q: "大量のデータを効率的に処理・分析する技術は？", options: ["ビッグデータ", "データマイニング"], correct: "ビッグデータ" },
+                    { q: "認証において、パスワード以外に指紋などの生体情報を用いる方法は？", options: ["単一認証", "二要素認証"], correct: "二要素認証" },
+                    { q: "サーバーやネットワーク機器の導入・管理なしに、インターネット経由でサービスを利用する形態は？", options: ["オンプレミス", "クラウドコンピューティング"], correct: "クラウドコンピューティング" },
+                    { q: "著作権で保護されているプログラムを無断でコピーすることに対して用いられる法律は？", options: ["独占禁止法", "不正競争防止法"], correct: "不正競争防止法" },
+                    { q: "ITシステムの開発手法で、小さな機能を短いサイクルで開発・改善していく手法は？", options: ["ウォーターフォール開発", "アジャイル開発"], correct: "アジャイル開発" },
+                ];
+                this.hardQuestions = [
+                    // 応用情報技術者レベル（より深い知識）- 計15問
+                    { q: "IPアドレス枯渇問題を受けて登場した、次世代のIPアドレスは？", options: ["IPv5", "IPv6"], correct: "IPv6" },
+                    { q: "データの追加と削除を先入れ先出し（FIFO）で行うデータ構造は？", options: ["スタック", "キュー"], correct: "キュー" },
+                    { q: "プログラム実行前にコンパイルが必要な言語は？", options: ["Python", "C言語"], correct: "C言語" },
+                    { q: "ソフトウェアのテスト手法で、内部構造を見ずに外部仕様から検証するのは？", options: ["ホワイトボックス", "ブラックボックス"], correct: "ブラックボックス" },
+                    { q: "トランザクションのACID特性のうち、処理が完了したら元に戻せない性質は？", options: ["一貫性 (Consistency)", "耐久性 (Durability)"], correct: "耐久性 (Durability)" },
+                    { q: "無線LANのセキュリティ標準の最新バージョンは？", options: ["WPA2", "WPA3"], correct: "WPA3" },
+                    { q: "RDBにおいて、テーブル間の関連付けに使うキーは？", options: ["主キー", "外部キー"], correct: "外部キー" },
+                    { q: "プロセッサの処理速度を表す単位で、1秒間に実行できる命令数を意味する略語は？", options: ["FLOPS", "MIPS"], correct: "MIPS" },
+                    { q: "ネットワークの通信速度が低下する現象を指す言葉は？", options: ["スループット低下", "レイテンシ増加"], correct: "スループット低下" },
+                    { q: "仮想記憶方式において、ページアウト・ページインが頻繁に発生し、システム性能が極端に低下する現象は？", options: ["デフラグメンテーション", "スラッシング"], correct: "スラッシング" },
+                    { q: "ソフトウェア開発におけるコスト・工数を見積もる手法の一つで、過去の類似プロジェクトを参考にするのは？", options: ["COCOMO法", "アナロジー法"], correct: "アナロジー法" },
+                    { q: "システムの信頼性を表す指標で、故障から復旧までの平均時間を意味する略語は？", options: ["MTBF", "MTTR"], correct: "MTTR" },
+                    { q: "離散的な値を連続的な波形で表現する方式は？", options: ["デジタル", "アナログ"], correct: "アナログ" },
+                    { q: "データウェアハウスのサブセットとして、特定の業務や部門に特化した小規模なデータベースは？", options: ["データレイク", "データマート"], correct: "データマート" },
+                    { q: "公開鍵暗号方式で、メッセージの送信者が「秘密鍵」で暗号化し、受信者が「公開鍵」で復号して本人確認を行う技術は？", options: ["共通鍵暗号", "デジタル署名"], correct: "デジタル署名" },
+                ];
+                
+                this.isHardMode = false;
+                this.questions = [];
+                this.currentQuestionIndex = -1;
+                this.state = 'INIT'; 
+                this.score = 0;
+                this.totalQuestions = 5; // 🔥 ここを5問に戻しました
+                this.life = 3; 
+                this.questionStartTime = 0;
+                this.timeLimit = 15; 
+                
+                this.selectedOption = null;
+                this.correctOption = null; 
+                this.trolleyZ = 0;
+                this.trolleyRotation = 0; 
+                this.trolleyRotationTarget = 0; 
+                this.trolleyYOffset = 0; 
+                this.trolleyYTarget = 0; 
+                this.targetDirection = 0; 
+                this.baseMoveSpeed = 0.5;
+                this.currentMoveSpeed = this.baseMoveSpeed; 
+                this.cameraZ = 0;
+                this.damageTimer = 0; 
+                
+                this.updateLifeDisplay();
+                this.selectRandomQuestions();
+                this.initGame();
+            }
+
+            toggleHardMode() {
+                this.isHardMode = !this.isHardMode;
+                this.selectRandomQuestions();
+                this.updateModeDisplay();
+                
+                startScreenEl.querySelector('.start-title').innerText = this.isHardMode ? "🔥 超難問トロッコ！🔥" : "トロッコ・サバイバル・クイズ！";
+                startScreenEl.querySelector('.start-instruction:nth-child(3)').innerHTML = this.isHardMode ? '🚨 <span class="start-highlight">応用情報技術者レベル</span> の難問に挑戦！' : '🚨 <span class="start-highlight">IT・プログラミング基礎</span> に挑戦！';
+                alert(this.isHardMode ? "超難問モードに切り替えました！" : "ITパスポートレベルに切り替えました！");
+            }
+            
+            updateModeDisplay() {
+                const color = this.isHardMode ? '#f44336' : '#4CAF50';
+                modeDisplayEl.innerHTML = `難易度: <span class="start-highlight" style="color: ${color};">${this.isHardMode ? '応用情報技術者レベル' : 'ITパスポートレベル'}</span>`;
+            }
+
+            selectRandomQuestions() {
+                const source = this.isHardMode ? this.hardQuestions : this.normalQuestions;
+                // ストックが増えたので、シャッフルして必要な分だけ選択
+                const shuffled = source.sort(() => 0.5 - Math.random());
+                this.questions = shuffled.slice(0, this.totalQuestions);
+            }
+
+            initGame() {
+                this.state = 'WAITING';
+                this.hideGameoverScreen();
+                this.hideResultOverlay();
+                startScreenEl.style.display = 'flex';
+                
+                document.getElementById('timer').innerText = '';
+                document.getElementById('question').innerText = '';
+                messageEl.innerText = '';
+                this.updateOptionDisplay(null, null);
+
+                this.trolleyZ = 0;
+                this.cameraZ = 150;
+                this.score = 0;
+                this.life = 3;
+                this.currentQuestionIndex = -1;
+                this.updateLifeDisplay();
+                this.updateModeDisplay(); 
+                
+                secretCommandLog = []; 
+            }
+
+            startGame() {
+                this.initGame(); 
+            }
+
+            updateLifeDisplay() {
+                lifeEl.innerHTML = 'ライフ: ';
+                for(let i = 0; i < 3; i++) {
+                    lifeEl.innerHTML += `<span class="heart">${i < this.life ? '❤️' : '🤍'}</span>`;
+                }
+            }
+
+            nextQuestion() {
+                if (this.life <= 0) {
+                    this.state = 'GAMEOVER';
+                    this.showGameoverScreen();
+                    return;
+                }
+
+                if (this.currentQuestionIndex >= this.totalQuestions - 1) {
+                    this.state = 'RESULT';
+                    this.showResultOverlay(true, true); 
+                    return;
+                }
+
+                this.currentQuestionIndex++;
+                const qData = this.questions[this.currentQuestionIndex];
+                
+                qData.options.sort(() => random() - 0.5);
+
+                this.currentQuestion = qData;
+                this.correctOption = qData.correct;
+                this.selectedOption = null;
+                this.targetDirection = 0;
+                this.questionStartTime = millis();
+                this.state = 'ASKING';
+                messageEl.innerText = '進路を選択し、振って確定！';
+                this.updateQuestionDisplay();
+                this.hideResultOverlay();
+            }
+
+            handleShake() {
+                if (this.state === 'ASKING') {
+                    this.state = 'MOVING';
+                    
+                    let selectionIndex = this.targetDirection === 1 ? 1 : 0;
+                    if (this.targetDirection === 0) selectionIndex = 0; 
+                    
+                    this.selectedOption = this.currentQuestion.options[selectionIndex];
+
+                    const isCorrect = this.selectedOption === this.correctOption;
+                    if (isCorrect) {
+                        this.score++;
+                        this.currentMoveSpeed = this.baseMoveSpeed * 3; 
+                    } else {
+                        this.life--;
+                        this.updateLifeDisplay();
+                        this.damageTimer = 10; 
+                        this.trolleyRotationTarget = random([-100, 100]); 
+                    }
+                    
+                    this.showResultOverlay(isCorrect);
+
+                    const selectedIndex = selectionIndex;
+                    this.trolleyRotationTarget = selectedIndex === 1 ? 60 : -60; 
+
+                    setTimeout(() => {
+                        this.currentMoveSpeed = this.baseMoveSpeed; 
+                        this.trolleyRotationTarget = 0;
+                        this.nextQuestion();
+                    }, 3000);
+                }
+            }
+
+            showResultOverlay(isCorrect, isClear = false) {
+                topInfoEl.style.display = 'none'; 
+                resultOverlayEl.style.display = 'flex';
+                
+                if (isClear) {
+                    resultOverlayEl.className = 'result-final-clear';
+                    resultMsgEl.innerText = this.isHardMode ? '👑 伝説達成！🏆' : '✨ 全問クリア！✨';
+                    resultAnsEl.innerHTML = `最終スコア: ${this.score}/${this.totalQuestions}`;
+                    
+                    if (!this.isHardMode) {
+                        secretHintEl.style.display = 'block';
+                        secretHintEl.innerHTML = `【隠し要素】最初の画面で「右→左→右」の順にスマホを傾けると...？`;
+                    } else {
+                        secretHintEl.style.display = 'none';
+                    }
+
+                    resultRetryMsgEl.style.display = 'block';
+                } else {
+                    resultOverlayEl.className = isCorrect ? 'result-correct' : 'result-incorrect';
+                    resultMsgEl.innerText = isCorrect ? '🎉 大正解！' : '❌ 不正解...';
+                    resultAnsEl.innerHTML = `あなたの選択: ${this.selectedOption || '未確定'} <br> 正解: ${this.correctOption}`;
+                    secretHintEl.style.display = 'none';
+                    resultRetryMsgEl.style.display = 'none';
+                    
+                    if (!isCorrect) {
+                        quizOverlayEl.classList.add('damage-effect');
+                    } else {
+                        quizOverlayEl.classList.remove('damage-effect');
+                    }
+                }
+            }
+
+            hideResultOverlay() {
+                topInfoEl.style.display = 'block';
+                resultOverlayEl.style.display = 'none';
+                quizOverlayEl.classList.remove('damage-effect');
+                secretHintEl.style.display = 'none';
+                resultRetryMsgEl.style.display = 'none';
+            }
+
+            showGameoverScreen() {
+                gameoverScreenEl.style.display = 'flex';
+                gameoverScoreEl.innerHTML = `スコア: ${this.score}/${this.totalQuestions} (モード: ${this.isHardMode ? '応用情報技術者レベル' : 'ITパスポートレベル'})`;
+                shakeCount = 0;
+                shakeGaugeEl.style.width = '0%';
+            }
+
+            hideGameoverScreen() {
+                gameoverScreenEl.style.display = 'none';
+            }
+
+            clearOptionHighlight() {
+                leftOptionEl.className = 'option';
+                rightOptionEl.className = 'option';
+            }
+
+            updateQuestionDisplay() {
+                if (!this.currentQuestion) return;
+                document.getElementById('question').innerHTML = `Q${this.currentQuestionIndex + 1}/${this.totalQuestions}: ${this.currentQuestion.q}`;
+                this.updateOptionDisplay(this.currentQuestion.options[0], this.currentQuestion.options[1]);
+            }
+
+            updateOptionDisplay(left, right) {
+                leftOptionEl.innerText = '← ' + (left || '');
+                rightOptionEl.innerText = (right || '') + ' →';
+                
+                if (this.state === 'WAITING' || this.state === 'RESULT' || this.state === 'GAMEOVER') {
+                    leftOptionEl.innerText = '';
+                    rightOptionEl.innerText = '';
+                }
+            }
+
+            update() {
+                if (this.state === 'GAMEOVER' || this.state === 'WAITING' || this.state === 'RESULT') return;
+
+                if (this.damageTimer > 0) {
+                    this.damageTimer--;
+                    this.trolleyRotation = random([-30, 30]); 
+                } else {
+                    const currentSpeed = this.currentMoveSpeed * (this.state === 'MOVING' ? 1.5 : 1);
+                    this.trolleyZ -= currentSpeed;
+                    this.cameraZ = lerp(this.cameraZ, this.trolleyZ + 200, 0.1); 
+                    
+                    this.trolleyYTarget = sin(this.trolleyZ * 2) * 2; 
+                    this.trolleyYOffset = lerp(this.trolleyYOffset, this.trolleyYTarget, 0.2);
+                }
+
+
+                if (this.state === 'ASKING') {
+                    // タイマー処理
+                    const elapsedTime = (millis() - this.questionStartTime) / 1000;
+                    const remainingTime = max(0, this.timeLimit - floor(elapsedTime));
+                    document.getElementById('timer').innerText = remainingTime;
+
+                    if (remainingTime <= 0) {
+                        this.state = 'MOVING'; 
+                        this.life--;
+                        this.updateLifeDisplay();
+                        messageEl.innerText = '⏰ タイムアップ！不正解';
+                        this.showResultOverlay(false);
+                        this.damageTimer = 10;
+                        this.trolleyRotationTarget = 0;
+                        setTimeout(() => {
+                            this.currentMoveSpeed = this.baseMoveSpeed;
+                            this.nextQuestion();
+                        }, 3000);
+                    }
+                    
+                    // 傾きによる方向決定とトロッコの回転 (視覚的な連動)
+                    if (currentGamma > 15) { 
+                        this.targetDirection = 1; 
+                        this.trolleyRotationTarget = 15; 
+                    } else if (currentGamma < -15) { 
+                        this.targetDirection = -1; 
+                        this.trolleyRotationTarget = -15; 
+                    } else {
+                        this.targetDirection = 0; 
+                        this.trolleyRotationTarget = 0;
+                    }
+
+                    // UIの選択強調
+                    this.clearOptionHighlight();
+                    if (this.targetDirection === -1) {
+                        leftOptionEl.classList.add('selected');
+                    } else if (this.targetDirection === 1) {
+                        rightOptionEl.classList.add('selected');
+                    }
+                } else if (this.state === 'MOVING') {
+                    // 確定後のUIハイライト
+                    const leftOption = this.currentQuestion.options[0];
+                    const rightOption = this.currentQuestion.options[1];
+                    const isCorrect = this.selectedOption === this.correctOption;
+
+                    this.clearOptionHighlight();
+                    if (this.selectedOption === leftOption) {
+                        leftOptionEl.classList.add(isCorrect ? 'correct-result' : 'incorrect-result');
+                    } else if (this.selectedOption === rightOption) {
+                        rightOptionEl.classList.add(isCorrect ? 'correct-result' : 'incorrect-result');
+                    }
+                }
+                
+                if (this.damageTimer <= 0) {
+                     this.trolleyRotation = lerp(this.trolleyRotation, this.trolleyRotationTarget, 0.1);
+                }
+            }
+
+            display() {
+                background(30, 40, 70); 
+
+                camera(0, -50, this.cameraZ, 
+                       0, 0, this.trolleyZ,
+                       0, 1, 0);
+
+                directionalLight(200, 200, 255, 0, 1, 0);
+                pointLight(255, 100, 0, 0, 0, this.trolleyZ - 100); 
+
+                this.drawRails();
+
+                // トロッコを描画
+                push();
+                translate(0, this.trolleyYOffset + 15, this.trolleyZ); 
+                rotateZ(this.trolleyRotation);
+                this.drawTrolley();
+                pop();
+            }
+
+            drawTrolley() {
+                // トロッコの描写サイズを約1.3倍に拡大
+                const scaleFactor = 1.3;
+                const baseWidth = 45 * scaleFactor;
+                const baseHeight = 22 * scaleFactor;
+                const baseDepth = 75 * scaleFactor;
+
+                // トロッコのベース
+                specularMaterial(150, 75, 0); 
+                box(baseWidth, baseHeight, baseDepth);
+
+                // トロッコの座席
+                specularMaterial(50); 
+                translate(0, -15 * scaleFactor, 0); 
+                box(baseWidth * 0.7, 8 * scaleFactor, baseDepth * 0.8);
+                
+                // 車輪 
+                specularMaterial(100);
+                const wheelRadius = 8 * scaleFactor; 
+                const wheelRotation = (this.trolleyZ * 0.5) * 50; 
+
+                for (let i = -1; i <= 1; i += 2) {
+                    for (let j = -1; j <= 1; j += 2) {
+                        push();
+                        translate(i * (baseWidth / 2 + 2 * scaleFactor), 15 * scaleFactor, j * (baseDepth / 2 - 5 * scaleFactor)); 
+                        rotateX(90);
+                        rotateZ(wheelRotation); 
+                        cylinder(wheelRadius, 8 * scaleFactor); 
+                        pop();
+                    }
+                }
+            }
+            
+            drawRails() {
+                specularMaterial(100); 
+                const railWidth = 5;
+                const railHeight = 5;
+                const railSpacing = 30; 
+                const renderDistance = 1000;
+                
+                // 枕木
+                specularMaterial(150, 75, 0);
+                for (let z = this.trolleyZ + 10; z > this.trolleyZ - renderDistance; z -= 30) {
+                    push();
+                    translate(0, railHeight / 2, z);
+                    box(railSpacing * 2.5, railHeight, 5); 
+                    pop();
+                }
+                
+                // レール
+                specularMaterial(100);
+                for (let i = -1; i <= 1; i += 2) {
+                    push();
+                    translate(i * railSpacing, railHeight, this.trolleyZ - renderDistance / 2);
+                    box(railWidth, railHeight * 2, renderDistance);
+                    pop();
+                }
+            }
+        }
+    </script>
+</body>
+</html>
